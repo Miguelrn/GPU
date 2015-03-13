@@ -1,4 +1,4 @@
-CC = nvcc 
+CC = /opt/cuda-6.5/bin/nvcc 
 
 EXE   = transpose 
 
@@ -7,7 +7,7 @@ SOURCES    = transpose.cu
 
 OBJS    = $(SOURCES:.cu=.o)
 
-CFLAGS     = -O3  
+CFLAGS     = -O3 -arch=compute_11
 
 LIBS = -lm 
 
