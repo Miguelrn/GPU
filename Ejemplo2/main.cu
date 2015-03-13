@@ -41,6 +41,21 @@ void print_matrix(float *M, int hM, int wM)
 	}
 }
 
+int check_matrix(float *h, float *d, int hM, int wM)
+{
+	int i,j;
+
+	for (i=0; i<hM; i++){
+		for (j=0; j<wM; j++)
+			if (fabsf(h[i*wM+j]-d[i*wM+j])>1e-5)
+			{
+				printf("device!=host %f!=%f in (%i,%i)\n", h[i*wM+j], d[i*wM+j], i, j);
+				return(0);
+			}
+	
+	}
+	return (1);
+}
 
 void Mul(float *A, float *B, int hA, int wA, int wB, float *C)
 {
@@ -61,29 +76,14 @@ void Mul(float *A, float *B, int hA, int wA, int wB, float *C)
 	}
 }
 
-/*__global__ void mulMatrixGPU(float *A, float *B, float *C, int hb ) // la funcion original del viernes pasado
-{
-	
-	int k, sum = 0;
- 	int col = threadIdx.x + blockDim.x * blockIdx.x;
- 	int fil = threadIdx.y + blockDim.y * blockIdx.y;
-
- 	 if (col < hb && fil < hb) {
-  		for (k = 0; k < hb; k++) {
- 		 	sum += A[fil * hb + k] * B[k * hb + col];
- 		 }
- 	 C[fil * hb + col] = sum;
- 	}
-}*/
-
-__global__ void mulMatrixGPU(float *A, float *B, float *C, int wa, int wb )
+__global__ void mulMatrixGPU(float *A, float *B, float *C, int wa, int wb, int ha )
 {
 	
 	int k, sum = 0;
  	int col = threadIdx.x + blockDim.x * blockIdx.x; //i
  	int fil = threadIdx.y + blockDim.y * blockIdx.y; //j
 
- 	if (col < hb && fil < hb) { //ojo no son cuadradas !!
+ 	if (col < wb && fil < ha) { //ojo no son cuadradas !!
   		for (k = 0; k < wa; k++) {
  		 	sum += A[fil * wa + k] * B[k * wb + col];
  		}
@@ -126,7 +126,9 @@ int main(int argc, char** argv)
 	int size_C = wB * hA;
 	C = (float*)malloc(size_C*sizeof(float));
 
-	Mul(A, B, hA, wA, wB, C);	
+	t0 = wtime();
+	Mul(A, B, hA, wA, wB, C);
+	t1 = wtime(); printf("Time CPU=%f\n", t1-t0);	
 
 	/* Mallocs GPU */
 	cudaMalloc((void **) &A_GPU, size_A*sizeof(float));
@@ -141,10 +143,10 @@ int main(int argc, char** argv)
 	/*****************/
 	/* Add Matrix GPU*/
 	/*****************/
-	dim3 dimBlock(wB,wB); // nThreads por bloque
-	dim3 dimGrid(hA,hA);//numBloques
+	dim3 dimBlock(16,16); // nThreads por bloque
+	dim3 dimGrid(hA,wB);//numBloques
 	t0 = wtime();
-	mulMatrixGPU<<<dimGrid,dimBlock>>>(A_GPU, B_GPU, C_GPU, wa, wb);// si las matrices no son cuadradas necesito ambos anchos CREO
+	mulMatrixGPU<<<dimGrid,dimBlock>>>(A_GPU, B_GPU, C_GPU, wA, wB,hA);// si las matrices no son cuadradas necesito ambos anchos CREO
 	cudaThreadSynchronize();
 	t1 = wtime(); printf("Time GPU=%f\n", t1-t0);
 
@@ -152,12 +154,14 @@ int main(int argc, char** argv)
 	C_host  = (float*)malloc(size_C*sizeof(float));
 	cudaMemcpy(C_host, C_GPU, size_C*sizeof(float), cudaMemcpyDeviceToHost);
 
-	// print Matrix
-	printf("\n\nMATRIX A\n");print_matrix(A, hA, wA);
-	printf("\n\nMATRIX B\n");print_matrix(B, hB, wB);
-	printf("\n\nMATRIX C\n");print_matrix(C, hA, wB);
+	check_matrix(C, C_host, hA, wB);
 
-	printf("\n\nMATRIX *C\n");print_matrix(C_host, hA, wB);
+	// print Matrix
+	//printf("\n\nMATRIX A\n");print_matrix(A, hA, wA);
+	//printf("\n\nMATRIX B\n");print_matrix(B, hB, wB);
+	//printf("\n\nMATRIX C\n");print_matrix(C, hA, wB);
+
+	//printf("\n\nMATRIX *C\n");print_matrix(C_host, hA, wB);
 
 	/* Free CPU */
 	free(A);
