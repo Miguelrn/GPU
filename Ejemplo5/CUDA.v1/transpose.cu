@@ -30,13 +30,12 @@ void init_seed()
 	srand( seedi );
 }
 
-void init2Drand(float **buffer, int n)
+void init2Drand(float *buffer, int n)
 {
-	int i, j;
+	int i;
 
-	for (i=0; i<n; i++)
-		for(j=0; j<n; j++)
-			buffer[i][j] = 500.0*(float(rand())/RAND_MAX)-500.0; /* [-500 500]*/
+	for (i=0; i<n*n; i++)
+			buffer[i] = 500.0*(float(rand())/RAND_MAX)-500.0; /* [-500 500]*/
 }
 
 float *getmemory1D( int nx )
@@ -135,29 +134,28 @@ __global__ void transpose_device(float *in, float *out, int rows, int cols)
 }
 
 #define TILE_DIM 16
-__global__ void transpose_device2D(float **in, float **out, int rows, int cols)
+__global__ void transpose_device2D(float *in, float *out, int rows, int cols)
 {
 	int i, j;
 	__shared__ float tile [TILE_DIM][TILE_DIM];
 	i = blockIdx.x * blockDim.x + threadIdx.x;
 	j = blockIdx.y * blockDim.y + threadIdx.y;
 	if (i<rows && j<cols) {
-		tile[i/TILE_DIM][j/TILE_DIM] = in[i][j];
+		tile[threadIdx.y][threadIdx.x] = in[j*cols+i];
 		__syncthreads();
-		//i = blockIdx.y * blockDim.y + threadIdx.y;
-		//j = blockIdx.x * blockDim.x + threadIdx.x ;
-		out[j][i] = tile[i/TILE_DIM][j/TILE_DIM];
-		//out[j][i] = in[i][j];
+		j = blockIdx.x * blockDim.x + threadIdx.x;
+		i = blockIdx.y * blockDim.y + threadIdx.y ;
+		out[j*rows+i] = tile[threadIdx.y ][threadIdx.x];
 	}
 }
 
-int check(float **GPU, float **CPU, int n)
+int check(float *GPU, float *CPU, int n)
 {
-	int i,j;
+	int i;
 
 	for (i=0; i<n; i++)
-		for (j=0; j<n; j++)
 			if(GPU[i]!=CPU[i])
+			//printf("cpu: %i,GPU: %i", CPU[i], GPU[i]);		
 			return(1);
 
 	return(0);
@@ -166,10 +164,10 @@ int check(float **GPU, float **CPU, int n)
 int main(int argc, char **argv)
 {
 	int n;
-	float **array2D, **array2D_trans;
-	float *array1D,  *array1D_trans;
-	float *array1D_trans_GPU;
-	float **array2D_trans_GPU;
+	float *array2D, *array2D_trans;
+	/*float *array1D,  *array1D_trans;
+	float *array1D_trans_GPU;*/
+	float *array2D_trans_GPU;
 
 	double t0;
 
@@ -182,42 +180,42 @@ int main(int argc, char **argv)
 	
 	/* Initizalization */
 	init_seed();
-	array2D       = getmemory2D(n,n);
-	array2D_trans = getmemory2D(n,n);
-	array1D_trans_GPU = getmemory1D(n*n);
-	array1D       = array2D[0];
-	array1D_trans = array2D_trans[0];
+	array2D       = getmemory1D(n*n);
+	array2D_trans = getmemory1D(n*n);
+	array2D_trans_GPU = getmemory1D(n*n);
+	/*array1D       = array2D[0];
+	array1D_trans = array2D_trans[0];*/
 	init2Drand(array2D, n);
 
 	/* Transpose 1D version */
 	t0 = getMicroSeconds();
-	transpose2D(array2D, array2D_trans, n);
+	transpose1D(array2D, array2D_trans, n);
 	printf("Transpose version 2D(cpu): %f MB/s\n", n*n*sizeof(float)/((getMicroSeconds()-t0)/1000000)/1024/1024);
 
 
 	/* CUDA vesion */
-	float *darray1D, *darray1D_trans;
+	/*float *darray1D, *darray1D_trans;
 	cudaMalloc((void**)&darray1D, n*n*sizeof(float));
 	cudaMemcpy(darray1D, array1D, n*n*sizeof(float), cudaMemcpyHostToDevice);
 	cudaMalloc((void**)&darray1D_trans, n*n*sizeof(float));
 
 	/*Cuda version 2D*/
-	float **darray2D, **darray2D_trans;
+	float *darray2D, *darray2D_trans;
 	cudaMalloc((void**)&darray2D, n*n*sizeof(float));
-	cudaMemcpy(darray1D, array2D, n*n*sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(darray2D, array2D, n*n*sizeof(float), cudaMemcpyHostToDevice);
 	cudaMalloc((void**)&darray2D_trans, n*n*sizeof(float));
 
-	dim3 dimBlock(NTHREADS1D);
-	int blocks = n/NTHREADS1D;
-		if (n%NTHREADS1D>0) blocks++;
-	dim3 dimGrid(blocks);
+	dim3 dimBlock(16,16);
+	int blocks = (n/16);
+		if (n%16>0) blocks++;
+	dim3 dimGrid(blocks,blocks);
 
-	t0 = getMicroSeconds();
+	/*t0 = getMicroSeconds();
 	transpose_device<<<dimGrid,dimBlock>>>(darray1D, darray1D_trans, n, n);	
 	cudaMemcpy(array1D_trans_GPU, darray1D_trans, n*n*sizeof(float), cudaMemcpyDeviceToHost);
 	cudaThreadSynchronize();
 	
-	printf("Transpose kernel version 1D(GPU): %f MB/s\n", n*n*sizeof(float)/((getMicroSeconds()-t0)/1000000)/1024/1024);
+	printf("Transpose kernel version 1D(GPU): %f MB/s\n", n*n*sizeof(float)/((getMicroSeconds()-t0)/1000000)/1024/1024);*/
 
 	t0 = getMicroSeconds();
 	transpose_device2D<<<dimGrid,dimBlock>>>(darray2D, darray2D_trans, n, n);	
@@ -227,7 +225,7 @@ int main(int argc, char **argv)
 	printf("Transpose kernel version 2D(GPU): %f MB/s\n", n*n*sizeof(float)/((getMicroSeconds()-t0)/1000000)/1024/1024);
 
 
-	if (check(array2D_trans_GPU, array2D_trans, n))
+	if (check(array2D_trans_GPU, array2D_trans, n*n))
 		printf("Transpose CPU-GPU differs!!\n");
 
 
